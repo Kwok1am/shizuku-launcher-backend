@@ -6,18 +6,8 @@ const PORT = process.env.PORT || 10001;
 
 const app = express();
 
-const corsOptions = {
-    origin: [
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://aws.32v.shop',
-        'https://aws.32v.shop',
-    ],
-    methods: 'GET,POST'
-};
-
 app.use(express.json());
-app.use(cors(corsOptions));
+app.use(cors())
 
 app.get("/", function (req, res) {
     res.send("App is working");
