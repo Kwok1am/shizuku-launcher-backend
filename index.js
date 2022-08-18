@@ -1,13 +1,14 @@
 const express = require("express");
 var cors = require('cors');
 var AWS = require('aws-sdk');
+var proxyAgent = require('proxy-agent');
 
 const PORT = process.env.PORT || 10001;
 
 const app = express();
 
 app.use(express.json());
-app.use(cors())
+app.use(cors());
 
 app.get("/", function (req, res) {
     res.send("App is working");
@@ -22,6 +23,11 @@ app.post("/aws-launch-instance", (req, res) => {
             region: req.body.region
         }
     );
+    if (req.body.useProxy) {
+        AWS.config.update({
+            httpOptions: { agent: proxyAgent(req.body.proxy) }
+        });
+    }
     var ec2 = new AWS.EC2();
     var imageName = ''
     var imageOwner = ''
@@ -68,7 +74,7 @@ app.post("/aws-launch-instance", (req, res) => {
     ec2.describeImages(imageParams, function (err, data) {
         if (err) {
             res.status(500).send({
-                reason: "An error occurred when launching the instance."
+                error: err
             });
         }
         else {
@@ -80,7 +86,7 @@ app.post("/aws-launch-instance", (req, res) => {
             ec2.createKeyPair(keyParams, function (err, data) {
                 if (err) {
                     res.status(500).send({
-                        reason: "An error occurred when launching the instance."
+                        error: err
                     });
                 } else {
                     var sgParams = {
@@ -90,7 +96,7 @@ app.post("/aws-launch-instance", (req, res) => {
                     ec2.createSecurityGroup(sgParams, function (err, data) {
                         if (err) {
                             res.status(500).send({
-                                reason: "An error occurred when launching the instance."
+                                error: err
                             });
                         } else {
                             groupId = data.GroupId
@@ -146,7 +152,7 @@ app.post("/aws-launch-instance", (req, res) => {
                             ec2.authorizeSecurityGroupIngress(asgParams, function (err, data) {
                                 if (err) {
                                     res.status(500).send({
-                                        reason: "An error occurred when launching the instance."
+                                        error: err
                                     });
                                 } else {
                                     var userDataRaw = "#!/bin/bash\necho root:" + req.body.password + "|sudo chpasswd root\nsudo rm -rf /etc/ssh/sshd_config\nsudo tee /etc/ssh/sshd_config <<EOF\nClientAliveInterval 120\nSubsystem       sftp    /usr/lib/openssh/sftp-server\nX11Forwarding yes\nPrintMotd no\nChallengeResponseAuthentication no\nPasswordAuthentication yes\nPermitRootLogin yes\nUsePAM yes\nAcceptEnv LANG LC_*\nEOF\nsudo systemctl restart sshd\n"
@@ -165,7 +171,7 @@ app.post("/aws-launch-instance", (req, res) => {
                                     ec2.runInstances(instanceParams, function (err, data) {
                                         if (err) {
                                             res.status(500).send({
-                                                reason: "An error occurred when launching the instance."
+                                                error: err
                                             });
                                         } else {
                                             res.status(200).send({
@@ -192,6 +198,11 @@ app.post("/aws-get-quota", (req, res) => {
             region: req.body.region
         }
     );
+    if (req.body.useProxy) {
+        AWS.config.update({
+            httpOptions: { agent: proxyAgent(req.body.proxy) }
+        });
+    }
     var servicequotas = new AWS.ServiceQuotas();
     var params = {
         QuotaCode: 'L-1216C47A',
@@ -200,7 +211,7 @@ app.post("/aws-get-quota", (req, res) => {
     servicequotas.getServiceQuota(params, function (err, data) {
         if (err) {
             res.status(500).send({
-                reason: "An error occurred when getting your EC2 quota."
+                error: err
             });
         }
         else {
@@ -220,12 +231,17 @@ app.post("/aws-check-instances", (req, res) => {
             region: req.body.region
         }
     );
+    if (req.body.useProxy) {
+        AWS.config.update({
+            httpOptions: { agent: proxyAgent(req.body.proxy) }
+        });
+    }
     var ec2 = new AWS.EC2();
     var params = {}
     ec2.describeInstances(params, function(err, data) {
         if (err) {
             res.status(500).send({
-                reason: "An error occurred when getting your instances."
+                error: err
             });
         }
         else {
@@ -237,7 +253,7 @@ app.post("/aws-check-instances", (req, res) => {
             })
             res.status(200).send({instances: processedInstances});
         }
-      });
+    });
 });
 
 app.listen(PORT, () => {
