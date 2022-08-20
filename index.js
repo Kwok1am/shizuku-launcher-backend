@@ -165,7 +165,7 @@ app.post("/aws-launch-instance", (req, res) => {
                                         MaxCount: 1,
                                         SecurityGroupIds: [
                                             groupId
-                                         ],
+                                        ],
                                         UserData: userData
                                     };
                                     ec2.runInstances(instanceParams, function (err, data) {
@@ -238,20 +238,122 @@ app.post("/aws-check-instances", (req, res) => {
     }
     var ec2 = new AWS.EC2();
     var params = {}
-    ec2.describeInstances(params, function(err, data) {
+    ec2.describeInstances(params, function (err, data) {
         if (err) {
             res.status(500).send({
                 error: err
             });
         }
         else {
-            var processedInstances = []
+            var processedInstances = [];
             data.Reservations.forEach(reservation => {
                 reservation.Instances.forEach(instance => {
-                    processedInstances.push({id: instance.InstanceId, type: instance.InstanceType, ip: instance.PublicIpAddress, platform: instance.PlatformDetails})
+                    processedInstances.push({ id: instance.InstanceId, state: instance.State.Code, type: instance.InstanceType, ip: instance.PublicIpAddress, platform: instance.PlatformDetails })
                 })
-            })
-            res.status(200).send({instances: processedInstances});
+            });
+            res.status(200).send({ instances: processedInstances });
+        }
+    });
+});
+
+app.post("/aws-terminate-instance", (req, res) => {
+    AWS.config = new AWS.Config();
+    AWS.config.update(
+        {
+            accessKeyId: req.body.aki,
+            secretAccessKey: req.body.saki,
+            region: req.body.region
+        }
+    );
+    if (req.body.useProxy) {
+        AWS.config.update({
+            httpOptions: { agent: proxyAgent(req.body.proxy) }
+        });
+    }
+    var ec2 = new AWS.EC2();
+    var params = {
+        InstanceIds: [
+            req.body.instanceId
+        ]
+    };
+    ec2.terminateInstances(params, function (err, data) {
+        if (err) {
+            res.status(500).send({
+                error: err
+            });
+        }
+        else {
+            res.status(200).send({
+                instanceId: data.TerminatingInstances[0].InstanceId
+            });
+        }
+    });
+});
+
+app.post("/aws-change-instance-ip", (req, res) => {
+    AWS.config = new AWS.Config();
+    AWS.config.update(
+        {
+            accessKeyId: req.body.aki,
+            secretAccessKey: req.body.saki,
+            region: req.body.region
+        }
+    );
+    if (req.body.useProxy) {
+        AWS.config.update({
+            httpOptions: { agent: proxyAgent(req.body.proxy) }
+        });
+    }
+    var ec2 = new AWS.EC2();
+    var allocateParams = {
+        Domain: "vpc"
+    };
+    ec2.allocateAddress(allocateParams, function (err, data) {
+        if (err) {
+            res.status(500).send({
+                error: err
+            });
+        }
+        else {
+            var newAllocationId = data.AllocationId;
+            var associateParams = {
+                AllocationId: newAllocationId,
+                InstanceId: req.body.instanceId,
+            };
+            ec2.associateAddress(associateParams, function (err, data) {
+                if (err) {
+                    res.status(500).send({
+                        error: err
+                    });
+                }
+                else {
+                    var disassociateParams = {
+                        AssociationId: data.AssociationId
+                    };
+                    ec2.disassociateAddress(disassociateParams, function (err, data) {
+                        if (err) {
+                            res.status(500).send({
+                                error: err
+                            });
+                        }
+                        else {
+                            var releaseParams = {
+                                AllocationId: newAllocationId
+                            };
+                            ec2.releaseAddress(releaseParams, function(err, data) {
+                                if (err) {
+                                    res.status(500).send({
+                                        error: err
+                                    });
+                                }
+                                else {
+                                    res.status(200).send({});
+                                }
+                            });
+                        }
+                    });
+                }
+            });
         }
     });
 });
