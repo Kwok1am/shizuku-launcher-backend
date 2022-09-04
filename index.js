@@ -1,5 +1,6 @@
 const express = require("express");
 var cors = require('cors');
+var http = require('http');
 var AWS = require('aws-sdk');
 var proxyAgent = require('proxy-agent');
 
@@ -12,6 +13,22 @@ app.use(cors());
 
 app.get("/", function (req, res) {
     res.send("App is working");
+});
+
+app.post("/get-ip", function (req, res) {
+    var opts = {
+        host: 'api.ipify.org',
+        port: 80,
+        path: '/'
+    };
+    if (req.body.useProxy) {
+        opts['agent'] = proxyAgent(req.body.proxy);
+    }
+    http.get(opts, (getIpRes) => {
+        getIpRes.on('data', (ip) => {
+            res.status(200).send({ ip: ip.toString() });
+        })
+    });
 });
 
 app.post("/aws-launch-instance", (req, res) => {
@@ -340,7 +357,7 @@ app.post("/aws-change-instance-ip", (req, res) => {
                             var releaseParams = {
                                 AllocationId: newAllocationId
                             };
-                            ec2.releaseAddress(releaseParams, function(err, data) {
+                            ec2.releaseAddress(releaseParams, function (err, data) {
                                 if (err) {
                                     res.status(500).send({
                                         error: err
