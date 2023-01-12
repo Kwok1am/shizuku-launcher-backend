@@ -32,6 +32,8 @@ app.post("/get-ip", function (req, res) {
 });
 
 app.post("/aws-launch-instance", (req, res) => {
+    const systemImageNameMap = new Map([["debian-10", "debian-10-amd64-2022*"], ["debian-11", "debian-11-amd64-2022*"], ["ubuntu-20.04", "ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-2022*"], ["ubuntu-22.04", "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-2022*"], ["Arch Linux", "*"], ["windows-server-2022-sc", "Windows_Server-2022-Chinese_Simplified-Full-Base-*"], ["windows-server-2022-en", "Windows_Server-2022-English-Full-Base-*"]]);
+    const systemImageOwnerMap = new Map([["debian-10", "136693071363"], ["debian-11", "136693071363"], ["ubuntu-20.04", "099720109477"], ["ubuntu-22.04", "099720109477"], ["Arch Linux", "647457786197"], ["windows-server-2022-sc", "801119661308"], ["windows-server-2022-en", "801119661308"]]);
     AWS.config = new AWS.Config();
     AWS.config.update(
         {
@@ -46,29 +48,8 @@ app.post("/aws-launch-instance", (req, res) => {
         });
     }
     var ec2 = new AWS.EC2();
-    var imageName = ''
-    var imageOwner = ''
-    var imageId = ''
-    if (req.body.system == 'Debian 10') {
-        imageName = 'debian-10-amd64-2022*'
-        imageOwner = '136693071363'
-    }
-    if (req.body.system == 'Debian 11') {
-        imageName = 'debian-11-amd64-2022*'
-        imageOwner = '136693071363'
-    }
-    if (req.body.system == 'Ubuntu 20.04') {
-        imageName = 'ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-2022*'
-        imageOwner = '099720109477'
-    }
-    if (req.body.system == 'Ubuntu 22.04') {
-        imageName = 'ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-2022*'
-        imageOwner = '099720109477'
-    }
-    if (req.body.system == 'Arch Linux') {
-        imageName = '*'
-        imageOwner = '647457786197'
-    }
+    var imageName = systemImageNameMap.get(req.body.system);
+    var imageOwner = systemImageOwnerMap.get(req.body.system);
     var imageParams = {
         Filters: [
             {
@@ -95,8 +76,8 @@ app.post("/aws-launch-instance", (req, res) => {
             });
         }
         else {
-            imageId = data.Images[0].ImageId
-            keyName = String(Date.now())
+            var imageId = data.Images[0].ImageId
+            var keyName = String(Date.now())
             var keyParams = {
                 KeyName: keyName
             };
@@ -106,6 +87,7 @@ app.post("/aws-launch-instance", (req, res) => {
                         error: err
                     });
                 } else {
+                    var keyMaterial = data.KeyMaterial;
                     var sgParams = {
                         Description: keyName,
                         GroupName: keyName
@@ -116,7 +98,7 @@ app.post("/aws-launch-instance", (req, res) => {
                                 error: err
                             });
                         } else {
-                            groupId = data.GroupId
+                            var groupId = data.GroupId
                             var asgParams = {
                                 GroupId: groupId,
                                 IpPermissions: [
@@ -172,9 +154,20 @@ app.post("/aws-launch-instance", (req, res) => {
                                         error: err
                                     });
                                 } else {
-                                    var userDataRaw = "#!/bin/bash\necho root:" + req.body.password + "|sudo chpasswd root\nsudo rm -rf /etc/ssh/sshd_config\nsudo tee /etc/ssh/sshd_config <<EOF\nClientAliveInterval 120\nSubsystem       sftp    /usr/lib/openssh/sftp-server\nX11Forwarding yes\nPrintMotd no\nChallengeResponseAuthentication no\nPasswordAuthentication yes\nPermitRootLogin yes\nUsePAM yes\nAcceptEnv LANG LC_*\nEOF\nsudo systemctl restart sshd\n"
-                                    var userData = btoa(userDataRaw)
+                                    var userData = "";
+                                    if (req.body.systemType == "Linux") {
+                                        var userDataRaw = "#!/bin/bash\necho root:" + req.body.password + "|sudo chpasswd root\nsudo rm -rf /etc/ssh/sshd_config\nsudo tee /etc/ssh/sshd_config <<EOF\nClientAliveInterval 120\nSubsystem       sftp    /usr/lib/openssh/sftp-server\nX11Forwarding yes\nPrintMotd no\nChallengeResponseAuthentication no\nPasswordAuthentication yes\nPermitRootLogin yes\nUsePAM yes\nAcceptEnv LANG LC_*\nEOF\nsudo systemctl restart sshd\n"
+                                        userData = btoa(userDataRaw)
+                                    }
                                     var instanceParams = {
+                                        BlockDeviceMappings: [
+                                            {
+                                                DeviceName: "/dev/xvda",
+                                                Ebs: {
+                                                    VolumeSize: parseInt(req.body.disk)
+                                                }
+                                            }
+                                        ],
                                         ImageId: imageId,
                                         InstanceType: req.body.type,
                                         KeyName: keyName,
@@ -192,7 +185,8 @@ app.post("/aws-launch-instance", (req, res) => {
                                             });
                                         } else {
                                             res.status(200).send({
-                                                instanceId: data.Instances[0].InstanceId
+                                                instanceId: data.Instances[0].InstanceId,
+                                                KeyMaterial: keyMaterial
                                             });
                                         }
                                     });
@@ -370,6 +364,38 @@ app.post("/aws-change-instance-ip", (req, res) => {
                         }
                     });
                 }
+            });
+        }
+    });
+});
+
+app.post("aws-get-windows-password", (req, res) => {
+    AWS.config = new AWS.Config();
+    AWS.config.update(
+        {
+            accessKeyId: req.body.aki,
+            secretAccessKey: req.body.saki,
+            region: req.body.region
+        }
+    );
+    if (req.body.useProxy) {
+        AWS.config.update({
+            httpOptions: { agent: proxyAgent(req.body.proxy) }
+        });
+    }
+    var ec2 = new AWS.EC2();
+    var params = {
+        InstanceId: req.body.instanceId
+      }
+      ec2.getPasswordData(params, function (err, data) {
+        if (err) {
+            res.status(500).send({
+                error: err
+            });
+        }
+        else {
+            res.status(200).send({
+                PasswordData: data.PasswordData
             });
         }
     });
